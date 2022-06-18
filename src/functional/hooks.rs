@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -7,32 +8,31 @@ use crate::{Effect, GuardList};
 
 pub trait StaticClone: Clone + 'static {}
 impl<T> StaticClone for T where T: Clone + 'static {}
+
 pub trait Guard: PartialEq + Clone + Debug + 'static {}
 impl<T> Guard for T where T: PartialEq + Clone + Debug + 'static {}
 
-pub struct Ref<T: StaticClone> {
-    id: (u32, usize),
+pub struct HookRef<T: StaticClone> {
     initial_value: T,
+    ref_cell: Rc<RefCell<dyn Any>>,
 }
 
-impl<T: StaticClone> Ref<T> {
+impl<T: StaticClone> HookRef<T> {
     pub fn get(&self) -> T {
-        let (bucket_id, ref_id) = self.id;
-
-        if let Some(bucket) = HookState::get_bucket(&bucket_id) {
-            let val = bucket.state_slots[ref_id].as_ref();
-            let val = val.downcast_ref::<T>().unwrap().clone();
-
-            return val;
-        }
-
-        self.initial_value.clone()
+        return self
+            .ref_cell
+            .borrow()
+            .downcast_ref::<T>()
+            .unwrap_or(&self.initial_value.clone())
+            .clone();
     }
 
     pub fn set(&self, value: T) {
-        let (bucket_id, ref_id) = self.id;
-        let bucket = HookState::get_bucket(&bucket_id).unwrap();
-        bucket.state_slots[ref_id as usize] = Box::new(value);
+        self.ref_cell
+            .borrow_mut()
+            .downcast_mut::<T>()
+            .unwrap()
+            .clone_from(&value);
     }
 }
 
@@ -50,15 +50,14 @@ pub fn use_state<T: StaticClone>(initial_state: T) -> (T, Rc<impl Fn(T) -> ()>) 
     panic!()
 }
 
-pub fn use_ref<T: StaticClone>(initial_state: T) -> Ref<T> {
+pub fn use_ref<T: StaticClone>(initial_state: T) -> HookRef<T> {
     if let Some(bucket) = HookState::get_current_bucket() {
-        let bucket_id = HookState::get_stack().last().unwrap().clone();
-        let ref_id = bucket.next_state_slot_idx;
         use_state(initial_state.clone());
+        let ref_ptr = Rc::clone(bucket.state_slots.last().unwrap());
 
-        return Ref {
-            id: (bucket_id, ref_id),
+        return HookRef {
             initial_value: initial_state,
+            ref_cell: ref_ptr,
         };
     }
 
@@ -71,26 +70,28 @@ pub fn use_reducer<T: StaticClone>(
 ) -> (T, Rc<impl Fn(T) -> ()>) {
     if let Some(bucket) = HookState::get_current_bucket() {
         let index = bucket.next_state_slot_idx.clone();
-        let id = HookState::last().unwrap().clone();
+        let value = Rc::new(RefCell::new(initial_value));
 
         if bucket.state_slots.len() <= index {
-            bucket.state_slots.push(Box::new(initial_value.clone()));
+            bucket.state_slots.push(value);
         }
 
-        let slot_value = bucket.state_slots[index]
-            .downcast_ref::<T>()
-            .unwrap_or(&initial_value)
-            .clone();
+        let slot_value = bucket.state_slots[index].clone();
 
         let slot = (
-            slot_value.clone(),
+            slot_value
+                .clone()
+                .borrow()
+                .downcast_ref::<T>()
+                .unwrap()
+                .clone(),
             Rc::new(move |update_value: T| {
-                print!("[Hook Reducer] use_reducer map {} to", id);
-                let id = HookState::map_id(id);
-                print!(" {}\n", id);
-                let bucket = HookState::get_bucket(&id).unwrap();
-                bucket.state_slots[index] =
-                    Box::new(reducer(slot_value.clone(), update_value.clone()));
+                let slot_ptr = Rc::clone(&slot_value);
+                let old_value = slot_ptr.borrow().downcast_ref::<T>().unwrap().clone();
+
+                let new_value = reducer(old_value.clone(), update_value);
+
+                *slot_ptr.borrow_mut().downcast_mut::<T>().unwrap() = new_value;
             }),
         );
 
@@ -138,8 +139,8 @@ pub fn use_effect<T: Guard>(func: impl Fn() -> fn() + 'static, guards: T) {
                 None
             };
 
-            let guards = Some(Box::new(guards) as Box<dyn Any>);
-            let effect_fn = Some(Box::new(effect_fn) as Effect);
+            let guards = Some(Rc::new(guards) as Rc<dyn Any>);
+            let effect_fn = Some(Rc::new(effect_fn) as Effect);
 
             bucket.effects[index] = (effect_fn, guards);
         }
@@ -153,7 +154,7 @@ pub fn use_effect<T: Guard>(func: impl Fn() -> fn() + 'static, guards: T) {
 pub fn use_memo<T: Guard, R: StaticClone>(func: impl Fn() -> R, guards: T) -> R {
     if let Some(bucket) = HookState::get_current_bucket() {
         if bucket.memoizations.len() <= bucket.next_memoization_idx {
-            bucket.memoizations.push((Box::new(()), None));
+            bucket.memoizations.push((Rc::new(()), None));
         }
 
         let index = bucket.next_memoization_idx;
@@ -162,7 +163,7 @@ pub fn use_memo<T: Guard, R: StaticClone>(func: impl Fn() -> R, guards: T) -> R 
         if guards_changed(&guards, last_guards) {
             let memo_value = func();
             bucket.memoizations[index] =
-                (Box::new(memo_value), Some(Box::new(guards) as Box<dyn Any>));
+                (Rc::new(memo_value), Some(Rc::new(guards) as Rc<dyn Any>));
         }
 
         let (memo, _) = &bucket.memoizations[index];

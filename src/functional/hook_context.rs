@@ -1,21 +1,23 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::{any::Any, collections::HashMap};
 
 use lazy_mut::LazyMut;
 
-pub type GuardList = Option<Box<dyn Any>>;
-pub type Effect = Box<dyn FnMut() -> Option<fn()>>;
+pub type GuardList = Option<Rc<dyn Any>>;
+pub type Effect = Rc<dyn Fn() -> Option<fn()>>;
 
 #[derive(Default)]
 pub struct Bucket {
     pub next_state_slot_idx: usize,
-    pub state_slots: Vec<Box<dyn Any>>,
+    pub state_slots: Vec<Rc<RefCell<dyn Any>>>,
 
     pub next_effect_idx: usize,
     pub effects: Vec<(Option<Effect>, GuardList)>,
     pub cleanups: Vec<Option<fn()>>,
 
     pub next_memoization_idx: usize,
-    pub memoizations: Vec<(Box<dyn Any>, GuardList)>,
+    pub memoizations: Vec<(Rc<dyn Any>, GuardList)>,
 }
 
 lazy_mut! {
@@ -121,7 +123,7 @@ impl HookState {
         let bucket = HookState::get_bucket(&id).unwrap();
         for (effect, _) in bucket.effects.iter_mut() {
             if let Some(effect) = effect {
-                effect.as_mut()();
+                effect();
             }
             *effect = None;
         }
