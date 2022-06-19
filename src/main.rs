@@ -5,6 +5,37 @@ mod functional;
 
 use functional::*;
 
+#[derive(Clone, Debug)]
+struct ComplexState {
+    pub value: i32,
+    pub name: String,
+}
+
+#[derive(Clone)]
+enum Action {
+    Increment(i32),
+    Decrement(i32),
+    SetName(String),
+}
+
+fn comp_state_reducer(state: ComplexState, action: Action) -> ComplexState {
+    let mut state = state;
+
+    match action {
+        Action::Increment(val) => {
+            state.value += val;
+        }
+        Action::Decrement(val) => {
+            state.value -= val;
+        }
+        Action::SetName(name) => {
+            state.name = name;
+        }
+    }
+
+    state
+}
+
 fn comp_a(id: u32) {
     HookState::before_run(id);
 
@@ -36,7 +67,13 @@ fn comp_a(id: u32) {
         (),
     );
 
-    let sum = use_memo(move || count + number, (count, number));
+    let sum = use_memo(
+        move || {
+            println!("[Comp Memo] comp_a() memoizing sum re-run.");
+            count + number
+        },
+        (count, number),
+    );
     let print_sum = use_callback(
         move || {
             println!("[Comp Callback] comp_a() sum: {}", sum);
@@ -53,13 +90,28 @@ fn comp_a(id: u32) {
     ref_val.set(ref_val.get() + 2);
     println!("[Comp Ref] comp_a() ref_val: {}", ref_val.get());
 
+    let (state, dispatch) = use_reducer(
+        comp_state_reducer,
+        ComplexState {
+            value: 0,
+            name: "name".to_string(),
+        },
+    );
+
+    dispatch(Action::Increment(1));
+    dispatch(Action::Decrement(2));
+    dispatch(Action::SetName(format!("{}_a", state.value)));
+
+    println!("[Comp Comp] comp_a() state: {:?}", state);
+
     HookState::after_run(id);
 }
 
 fn main() {
     HookState::init();
-    comp_a(1);
-    comp_a(1);
-    comp_a(1);
-    HookState::reset(1);
+    let id = HookState::create_comp_id();
+    comp_a(id);
+    comp_a(id);
+    comp_a(id);
+    HookState::reset(id);
 }
