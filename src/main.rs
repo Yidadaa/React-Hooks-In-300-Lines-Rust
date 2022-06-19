@@ -36,6 +36,11 @@ fn comp_state_reducer(state: ComplexState, action: Action) -> ComplexState {
     state
 }
 
+#[derive(Clone, Debug)]
+struct ThemeContext {
+    pub theme: String,
+}
+
 fn comp_a(id: u32) {
     HookState::before_run(id);
 
@@ -102,9 +107,20 @@ fn comp_a(id: u32) {
     dispatch(Action::Decrement(2));
     dispatch(Action::SetName(format!("{}_a", state.value)));
 
-    println!("[Comp Comp] comp_a() state: {:?}", state);
+    println!("[Comp] comp_a() state: {:?}", state);
+
+    Context::new(ThemeContext {
+        theme: "light".to_string(),
+    })
+    .provide(sub_comp);
 
     HookState::after_run(id);
+}
+
+fn sub_comp() {
+    let ctx = use_context::<ThemeContext>();
+
+    println!("[Sub Comp] sub_comp() ctx: {:?}", ctx.theme);
 }
 
 fn main() {

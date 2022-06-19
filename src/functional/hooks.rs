@@ -178,3 +178,7 @@ pub fn use_callback<T: Guard, F: StaticClone>(func: F, guards: T) -> F {
 
     panic!()
 }
+
+pub fn use_context<T: StaticClone>() -> T {
+    HookState::get_context::<T>()
+}

@@ -1,8 +1,11 @@
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::{any::Any, collections::HashMap};
 
 use lazy_mut::LazyMut;
+
+use super::StaticClone;
 
 pub type GuardList = Option<Rc<dyn Any>>;
 pub type Effect = Rc<dyn Fn() -> Option<fn()>>;
@@ -22,9 +25,28 @@ pub struct Bucket {
 
 lazy_mut! {
     static mut BUCKETS: HashMap<u32, Bucket> = HashMap::new();
+    static mut CONTEXTS: HashMap<TypeId, Rc<dyn Any>> = HashMap::new();
     static mut STATEMAP: HashMap<u32, u32> = HashMap::new();
     static mut STACK: Vec<u32> = vec![];
     static mut FUNCID: u32 = 0;
+}
+
+pub struct Context<T: StaticClone> {
+    pub value: T,
+}
+
+impl<T: StaticClone> Context<T> {
+    pub fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    pub fn provide<B>(&self, child: impl Fn() -> B) -> B {
+        HookState::push_context(self.value.clone());
+        let ret = child();
+        HookState::pop_context::<T>();
+
+        ret
+    }
 }
 
 pub struct HookState;
@@ -33,6 +55,7 @@ impl HookState {
     pub fn init() {
         unsafe {
             HookState::try_init_static(&mut BUCKETS);
+            HookState::try_init_static(&mut CONTEXTS);
             HookState::try_init_static(&mut STACK);
             HookState::try_init_static(&mut FUNCID);
             HookState::try_init_static(&mut STATEMAP);
@@ -45,12 +68,32 @@ impl HookState {
         }
     }
 
-    pub fn get_buckets() -> &'static HashMap<u32, Bucket> {
-        return unsafe { &BUCKETS };
+    pub fn push_context<T: StaticClone>(context: T) {
+        let id = TypeId::of::<T>();
+
+        unsafe {
+            CONTEXTS.insert(id, Rc::new(context));
+        }
     }
 
-    pub fn get_stack() -> &'static Vec<u32> {
-        return unsafe { &STACK };
+    pub fn pop_context<T: StaticClone>() {
+        let id = TypeId::of::<T>();
+
+        unsafe {
+            CONTEXTS.remove(&id);
+        }
+    }
+
+    pub fn get_context<T: StaticClone>() -> T {
+        let id = TypeId::of::<T>();
+
+        unsafe {
+            if let Some(ctx) = CONTEXTS.get(&id) {
+                return ctx.downcast_ref::<T>().unwrap().clone();
+            }
+        }
+
+        panic!("Context not found");
     }
 
     pub fn get_current_bucket() -> Option<&'static mut Bucket> {
@@ -76,15 +119,7 @@ impl HookState {
         unsafe {
             *FUNCID = (1 + *FUNCID) % u32::max_value();
 
-            println!("[Hook Create Comp] create comp id: {}", *FUNCID);
-
             *FUNCID
-        }
-    }
-
-    pub fn reset_comp_id() {
-        unsafe {
-            *FUNCID = 0;
         }
     }
 
