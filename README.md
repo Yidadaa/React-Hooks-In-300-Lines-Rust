@@ -86,3 +86,82 @@ impl ::yew::functional::FunctionProvider for StateComp {
 而且从展开后的代码可以看到，那个熟悉的 `ctx` 它又来了，它的类型 `HookContext` 也表明它和本文要讲的 hook 有关。
 
 ## 函数式组件的上下文
+函数式编程是一个很唬人的名词，React 刚引入函数式组件时，很多程序员趋之若鹜，但很多像我一样的初学者看到函数式组件时，总会发出灵魂之问：[这哪里函数式了？](
+https://www.zhihu.com/question/343314784/answer/937174224)
+
+React 核心开发者 Dan 很早就写过[一篇文章](https://overreacted.io/zh-hans/how-are-function-components-different-from-classes/)来阐述函数式组件与类组件的关系，里面有一句很有意思的话：函数式组件捕获了渲染所用的值。有意思的点就在于“捕获”二字，如果你背诵过 Javascipt 的八股文，就知道 Javascipt 的闭包往往和局部变量一起使用，一个典型的使用场景如下所示：
+
+```js
+const debounce = (delay, cb = () => {}) => {
+    let timer = null
+
+    return (...args) => {
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => cb(...args), delay);
+    }
+}
+
+const f = debounce(1000, console.log)
+
+f(1)
+setTimeout(() => f(2), 500) // 500ms 后调用 f(2) 
+
+// 1000ms 后只会打印 2，而 1 不会被打印
+```
+
+`debounce` 函数返回了一个闭包函数，而这个闭包则捕获了局部变量 `timer`，并在每次执行的时候检查是否应该清除上次调用的延时函数。
+
+这看起来很美好，然而如果我们将这种可变捕获应用到更复杂的例子里，事情就变得复杂起来了，比如下面这种情况：
+
+```js
+const foo = () => {
+    const complexObj = {
+        val: 1
+    }
+
+    const printValOfObj = () => {
+        console.log(complexObj.val)
+    }
+
+    setTimeout(() => {
+        printValOfObj()
+    }, 100);
+
+    complexObj.val = 114514
+}
+
+foo()
+
+// >> 114514 会被打印，而不是 1
+```
+
+Javascipt 的闭包在捕获非原始类型（Object / Array 等）时，总是持有它们的引用，而且由于 Javascipt 宽松的可变性控制，即使你将被捕获的值声明为 `const`，别人也可以轻松绕过这道马奇诺防线修改它的内部值，这也前端老八股了。
+
+正是这种形同虚设的可变性控制，使用 React 类组件构建复杂应用时就非常出问题，因为放在 `this` 中的值太不靠谱了，但是基于不可变状态的 React Hooks 以及函数式组件却没有这种烦恼。
+
+比如一个典型的 React 函数式组件：
+
+```jsx
+function simpleComp() {
+    const [count, setCount] = useState(0) 
+
+    return <button onClick={() => setCount(count + 1)}>click me {count}</button>
+}
+
+```
+
+这跟我们前文展示的 Yew 和 Dioxus 的示例如出一辙（这句是纯纯废话，哪有爹像儿子的），同时也隐藏了初学者们最大的疑惑：你这函数看起来不纯啊，这不还是有内部状态嘛？
+
+哈哈，确实。React 会在 diff 的时候帮你把组件的状态保持下来，从而使函数式组件拥有了状态，但这种状态同样可以看作是外部注入的，还记得我们在前文吐槽的 `ctx` 和 `cx` 吗？它们其实就是外部注入给组件的状态，而 React 在运行时也同样会帮你做这件事，你的组件在运行时更像这个样子：
+
+```js
+funtion simpleComp(ctx) {
+    const [count, setCount] = useState(ctx, 0)
+
+    return <button onClick={() => setCount(count + 1)}>click me {count}</button>
+}
+```
+
+而此时，这个函数式组件是不是变得“纯”了起来？这里的 `ctx`，我们可以称之为函数式组件的上下文（Hook Context，注意和组件的 useContext hook 做区分，但到了后面你就知道它们关系也很紧密），而 `useState` 这些 hook 做的事情就是从上下文中取出外部注入给组件的状态的深拷贝： `const [state, setState] = useState(initialState)`，即便我们不小心改变了 `state` 的值，也不会影响组件真正的状态，而如果想要改变 `state`，则只能通过 `setState` 去更新，从而让组件状态拥有了严格的可变性控制。
+
+## 声明式组件的状态
