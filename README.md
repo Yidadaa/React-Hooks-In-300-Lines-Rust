@@ -165,3 +165,35 @@ funtion simpleComp(ctx) {
 而此时，这个函数式组件是不是变得“纯”了起来？这里的 `ctx`，我们可以称之为函数式组件的上下文（Hook Context，注意和组件的 useContext hook 做区分，但到了后面你就知道它们关系也很紧密），而 `useState` 这些 hook 做的事情就是从上下文中取出外部注入给组件的状态的深拷贝： `const [state, setState] = useState(initialState)`，即便我们不小心改变了 `state` 的值，也不会影响组件真正的状态，而如果想要改变 `state`，则只能通过 `setState` 去更新，从而让组件状态拥有了严格的可变性控制。
 
 ## 声明式组件的状态
+在 jQuery 时代，人们总是习惯使用 `$(dom).text(name)` 的方式更新页面 UI，这种一般称为命令式编程，后来大家觉得这样好麻烦，就出现了 React 这样的声明式框架来糊页面。
+
+声明式的好处在于可以很方便地做组件抽象，页面结构以一种合乎直觉的方式描绘出来，在 React 中，一个典型的组件结构可以这样描绘出来：
+
+```jsx
+function App() {
+    const [todoList, setTodoList] = useState(new Array(10).fill(0))
+    const [randomIndex, setRandomIndex] = useState(Math.ceil(Math.random() * todoList.length))
+
+    return <div>
+        <div>Todo List</div> 
+        {
+            todoList.map((_, i) => <TodoItem key={i} text={`item ${i}`} disabled={i === randomIndex}/>)
+        }
+        <button onClick={() => setTodoList([])}>Clear All</button>
+    </div>
+}
+
+function TodoItem(props = { disabled: false, text: '' }) {
+    const [isSelected, setSelected] = useState(false)
+
+    return <div onClick={() => !props.disabled && setSelected(true)}>
+        Todo Item {props.text} { selectedIndex === i ? 'Selected' : ''}
+    </div>
+}
+```
+
+我们可以用书写逻辑代码的方式描述组件的动态交互状态，上面的例子中，我们把每个 TodoItem 组件的选中状态封装起来，而 Todo 内容和禁用状态为受控状态。
+
+整个 App 的状态通过 `useState` 被**声明**了出来，当状态改变时，UI 也会随之改变，此时页面的组件结构和对应的状态如下图：
+
+![组件树与状态树](images/comp-state-tree.png)
